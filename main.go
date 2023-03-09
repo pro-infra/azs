@@ -2,13 +2,20 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/manifoldco/promptui"
 )
+
+var version string
+
+const GOARCH string = runtime.GOARCH
+const GOOS string = runtime.GOOS
 
 type subscription struct {
 	CloudName string `json:"cloudName"`
@@ -35,13 +42,15 @@ func getSubscriptions() []subscription {
 func select_subscriptions(subscriptions []subscription) subscription {
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}?",
-		Active:   "\U00002714 {{ .Name | cyan }}",
+		Active:   "\U00002714 {{ .Name | blue }}",
 		Inactive: "  {{ .Name | cyan }}",
-		Selected: "\U00002714 {{ .Name | red | cyan }}",
+		Selected: "\U00002714 {{ .Name | blue }}",
 		Details: `
---------- Subscription ----------
+------------------------ Details -------------------------
 {{ "Name:" | faint }}	{{ .Name }}
-{{ "ID:" | faint }}	{{ .ID }}`,
+{{ "ID:" | faint }}	{{ .ID }}
+{{ "Tenant ID:" | faint }}	{{ .TenantID }}
+`,
 	}
 
 	searcher := func(input string, index int) bool {
@@ -88,8 +97,24 @@ func set_subscription(s subscription) {
 }
 
 func main() {
+	showVersion := false
+	update := false
+	dryupd := false
+	flag.BoolVar(&showVersion, "v", false, "Show version")
+	flag.BoolVar(&update, "u", false, "Update azs")
+	flag.BoolVar(&dryupd, "U", false, "Dry-run update azs")
+	flag.Parse()
+
+	switch {
+	case showVersion:
+		fmt.Println(version, GOOS, GOARCH)
+		return
+	case update || dryupd:
+		updateazs(dryupd)
+		return
+	}
+
 	subscriptions := getSubscriptions()
 	s := select_subscriptions(subscriptions)
-	fmt.Printf("Select NAME: %s\n", s.Name)
 	set_subscription(s)
 }
