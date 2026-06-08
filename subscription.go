@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -19,14 +21,14 @@ type subscription struct {
 	ID          string `json:"id"`
 	IsDefault   bool   `json:"isDefault"`
 	Name        string
-	OrginalName string `json:"name"`
+	OriginalName string `json:"name"`
 	State       string `json:"state"`
 	TenantID    string `json:"tenantId"`
 }
 
 func getSubscriptions() []subscription {
 	subscriptions := []subscription{}
-	out, err := exec.Command("bash", "-c", "az account list").Output()
+	out, err := exec.Command("az", "account", "list").Output()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -47,7 +49,7 @@ func getSubscriptions() []subscription {
 	return subscriptions
 }
 
-func select_subscriptions(subscriptions []subscription) subscription {
+func selectSubscriptions(subscriptions []subscription) subscription {
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}?",
 		Active:   "\U00002714 {{ .Name | blue }}",
@@ -55,7 +57,7 @@ func select_subscriptions(subscriptions []subscription) subscription {
 		Selected: "\U00002714 {{ .Name | blue }}",
 		Details: `
 ------------------------ Details -------------------------
-{{ "Name:" | faint }}	{{if eq .Name .OrginalName}}{{ .Name }}{{else}}{{ .OrginalName }}{{end}}
+{{ "Name:" | faint }}	{{if eq .Name .OriginalName}}{{ .Name }}{{else}}{{ .OriginalName }}{{end}}
 {{ "ID:" | faint }}	{{ .ID }}
 {{ "Tenant ID:" | faint }}	{{ .TenantID }}
 `,
@@ -93,9 +95,8 @@ func select_subscriptions(subscriptions []subscription) subscription {
 	return subscriptions[i]
 }
 
-func set_subscription(s subscription) {
-	cmd := fmt.Sprintf("az account set --subscription %s", s.ID)
-	out, err := exec.Command("bash", "-c", cmd).Output()
+func setSubscription(s subscription) {
+	out, err := exec.Command("az", "account", "set", "--subscription", s.ID).Output()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -107,11 +108,14 @@ func set_subscription(s subscription) {
 func stringInput(desc string) string {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print(desc)
-	outstr, _ := reader.ReadString('\n')
-	return strings.Replace(outstr, "\n", "", -1)
+	outstr, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		log.Fatal(err)
+	}
+	return strings.TrimRight(outstr, "\r\n")
 }
 
-func edit_subscription(s subscription) {
+func editSubscription(s subscription) {
 	project := stringInput("Project : ")
 	name_str := stringInput("Name    : ")
 	name := fmt.Sprintf("%s - %s", project, name_str)

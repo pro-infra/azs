@@ -53,7 +53,7 @@ func (c *aliasConfig) store(s subscription) {
 }
 
 func (c *aliasConfig) get(s subscription) subscription {
-	s.Name = fmt.Sprintf("z - %s", s.OrginalName)
+	s.Name = fmt.Sprintf("z - %s", s.OriginalName)
 	if name, ok := c.Subscriptions[s.ID]; ok {
 		s.Name = name
 	}

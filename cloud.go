@@ -19,7 +19,7 @@ type cloud struct {
 
 func getClouds() []cloud {
 	clouds := []cloud{}
-	out, err := exec.Command("bash", "-c", "az cloud list").Output()
+	out, err := exec.Command("az", "cloud", "list").Output()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func getClouds() []cloud {
 	return clouds
 }
 
-func select_clouds(clouds []cloud) cloud {
+func selectClouds(clouds []cloud) cloud {
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}?",
 		Active:   "\U00002714 {{ .Name | blue }}",
@@ -79,9 +79,8 @@ func select_clouds(clouds []cloud) cloud {
 	return clouds[i]
 }
 
-func set_cloud(c cloud) {
-	cmd := fmt.Sprintf("az cloud set --name  %s", c.Name)
-	out, err := exec.Command("bash", "-c", cmd).Output()
+func setCloud(c cloud) {
+	out, err := exec.Command("az", "cloud", "set", "--name", c.Name).Output()
 	if err != nil {
 		log.Fatal(err)
 	}

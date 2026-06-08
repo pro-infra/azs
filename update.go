@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 )
@@ -17,7 +18,7 @@ const (
 	GITHUB_REPO  = "azs"
 )
 
-type versiont struct {
+type semver struct {
 	maj, min, pat int
 }
 
@@ -29,38 +30,44 @@ type GitHubTagResponse struct {
 var versionExp = regexp.MustCompile(`^refs/tags/v[0-9]+.[0-9]+(.[0-9]+)?$`)
 var versionNumExp = regexp.MustCompile(`[0-9]+`)
 
-func VersionFromString(str string) versiont {
+func versionFromString(str string) semver {
 	if !versionExp.MatchString(str) {
-		return versiont{}
+		return semver{}
 	}
 
-	var ver versiont
 	s := versionNumExp.FindAllString(str, -1)
-	if i, err := strconv.Atoi(s[0]); err != nil {
-		return versiont{}
-	} else {
-		ver.maj = i
+	if len(s) < 2 {
+		return semver{}
 	}
-	if i, err := strconv.Atoi(s[1]); err != nil {
-		return versiont{}
-	} else {
-		ver.min = i
+
+	var ver semver
+	maj, err := strconv.Atoi(s[0])
+	if err != nil {
+		return semver{}
 	}
+	ver.maj = maj
+
+	min, err := strconv.Atoi(s[1])
+	if err != nil {
+		return semver{}
+	}
+	ver.min = min
+
 	if len(s) == 3 {
-		if i, err := strconv.Atoi(s[2]); err != nil {
-			return versiont{}
-		} else {
-			ver.pat = i
+		pat, err := strconv.Atoi(s[2])
+		if err != nil {
+			return semver{}
 		}
+		ver.pat = pat
 	}
 	return ver
 }
 
-func (v versiont) eq(v2 versiont) bool {
+func (v semver) eq(v2 semver) bool {
 	return v.maj == v2.maj && v.min == v2.min && v.pat == v2.pat
 }
 
-func (v versiont) gt(v2 versiont) bool {
+func (v semver) gt(v2 semver) bool {
 	if v.maj != v2.maj {
 		return v.maj > v2.maj
 	}
@@ -70,23 +77,22 @@ func (v versiont) gt(v2 versiont) bool {
 	return v.pat > v2.pat
 }
 
-func (v versiont) ge(v2 versiont) bool {
+func (v semver) ge(v2 semver) bool {
 	return v.eq(v2) || v.gt(v2)
 }
 
-func (v versiont) String() string {
+func (v semver) String() string {
 	return fmt.Sprintf("v%d.%d.%d", v.maj, v.min, v.pat)
 }
 
-func updateazs(dryRun bool) {
-	var err error
-	var versions []versiont
-	if versions, err = getAvailableVersions(GITHUB_OWNER, GITHUB_REPO); err != nil {
+func updateAzs(dryRun bool) {
+	versions, err := getAvailableVersions(GITHUB_OWNER, GITHUB_REPO)
+	if err != nil {
 		log.Fatalln(err)
 	}
 
-	if len(versions) <= 1 {
-		log.Println("No newer version found")
+	if len(versions) == 0 {
+		log.Println("No versions found")
 		return
 	}
 
@@ -96,7 +102,7 @@ func updateazs(dryRun bool) {
 			max = v
 		}
 	}
-	current := VersionFromString(version)
+	current := versionFromString(version)
 	if current.ge(max) {
 		log.Println("Newest version is already installed")
 		return
@@ -113,7 +119,11 @@ func updateazs(dryRun bool) {
 		log.Fatalln(err)
 	}
 
-	url := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/azs.%s_%s", GITHUB_OWNER, GITHUB_REPO, max.String(), GOOS, GOARCH)
+	ext := ""
+	if goOS == "windows" {
+		ext = ".exe"
+	}
+	url := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/azs.%s_%s%s", GITHUB_OWNER, GITHUB_REPO, max.String(), goOS, goArch, ext)
 	if dryRun {
 		log.Println("Would download", url, "to", filename)
 	} else {
@@ -124,27 +134,23 @@ func updateazs(dryRun bool) {
 	log.Println("success")
 }
 
-func getAvailableVersions(owner, repo string) ([]versiont, error) {
+func getAvailableVersions(owner, repo string) ([]semver, error) {
 	client := &http.Client{}
-	header := map[string][]string{
-		"Accept": {"application/json"},
-	}
-	var err error
-	var req *http.Request
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/refs/tags", owner, repo)
-	if req, err = http.NewRequest("GET", url, nil); err != nil {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
 		return nil, err
 	}
-	req.Header = header
+	req.Header = http.Header{"Accept": {"application/json"}}
 
-	var resp *http.Response
-	if resp, err = client.Do(req); err != nil {
+	resp, err := client.Do(req)
+	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var body []byte
-	if body, err = io.ReadAll(resp.Body); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return nil, err
 	}
 
@@ -156,21 +162,20 @@ func getAvailableVersions(owner, repo string) ([]versiont, error) {
 	return parseVersions(tags), nil
 }
 
-func parseVersions(tags []GitHubTagResponse) []versiont {
-	versions := make([]versiont, len(tags))
-	for i, tag := range tags {
+func parseVersions(tags []GitHubTagResponse) []semver {
+	versions := make([]semver, 0, len(tags))
+	for _, tag := range tags {
 		if versionExp.MatchString(tag.Ref) {
 			log.Println("Found version", tag.Ref)
-			versions[i] = VersionFromString(tag.Ref)
+			versions = append(versions, versionFromString(tag.Ref))
 		}
 	}
 	return versions
 }
 
 func checkWriteProtection(filename string) error {
-	var err error
-	var info os.FileInfo
-	if info, err = os.Lstat(filename); err != nil {
+	info, err := os.Lstat(filename)
+	if err != nil {
 		return err
 	}
 	if info.Mode().Perm()&0200 == 0 {
@@ -180,19 +185,37 @@ func checkWriteProtection(filename string) error {
 }
 
 func downloadFile(url, filename string) error {
-	var err error
-	var resp *http.Response
-	if resp, err = http.Get(url); err != nil {
+	resp, err := http.Get(url)
+	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	var file *os.File
-	if file, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755); err != nil {
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(filename), "azs-update-*")
+	if err != nil {
 		return err
 	}
-	defer file.Close()
+	tmpName := tmp.Name()
 
-	_, err = io.Copy(file, resp.Body)
-	return err
+	if _, err = io.Copy(tmp, resp.Body); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err = tmp.Chmod(0755); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	tmp.Close()
+
+	if err = os.Rename(tmpName, filename); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
